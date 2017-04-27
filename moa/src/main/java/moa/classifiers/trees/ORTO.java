@@ -88,7 +88,7 @@ public class ORTO extends FIMTDD implements Regressor {
 
 	//region ================ CLASSES ================
 
-	public static class OptionNode extends InnerNode {
+	public static class OptionNode extends FIMTDDInnerNode {
 
 		private static final long serialVersionUID = 1L;
 
@@ -111,7 +111,7 @@ public class ORTO extends FIMTDD implements Regressor {
 
 		public int getNumSubtrees() {
 			int num = 0;
-			for (Node child : children) {
+			for (FIMTDDNode child : children) {
 				num += child.getNumSubtrees();
 			}
 			return num;
@@ -187,19 +187,19 @@ public class ORTO extends FIMTDD implements Regressor {
 				new Measurement("number of option nodes", this.optionNodeCount),};
 	}
 
-	public void processInstance(Instance inst, Node node, double prediction, double normalError, boolean growthAllowed, boolean inAlternate) {
+	public void processInstance(Instance inst, FIMTDDNode node, double prediction, double normalError, boolean growthAllowed, boolean inAlternate) {
 		if (node instanceof OptionNode) {
 			processInstanceOptionNode(inst, (OptionNode) node, prediction, normalError, growthAllowed, inAlternate);
 		} else {
-			Node currentNode = node;
+			FIMTDDNode currentNode = node;
 			while (true) {
-				if (currentNode instanceof LeafNode) {
-					((LeafNode) currentNode).learnFromInstance(inst, growthAllowed);
+				if (currentNode instanceof FFMTDDLeafNode) {
+					((FFMTDDLeafNode) currentNode).learnFromInstance(inst, growthAllowed);
 					break;
 				} else {
 					currentNode.examplesSeen += inst.weight();
 					currentNode.sumOfAbsErrors += inst.weight() * normalError;
-					InnerNode iNode = (InnerNode) currentNode;
+					FIMTDDInnerNode iNode = (FIMTDDInnerNode) currentNode;
 					if (!inAlternate && iNode.alternateTree != null) {
 						boolean altTree = true;
 						double lossO = Math.pow(inst.classValue() - prediction, 2);
@@ -223,10 +223,10 @@ public class ORTO extends FIMTDD implements Regressor {
 							iNode.previousWeight = iNode.lossExamplesSeen;
 							if (Qi > 0) {
 								// Switch the subtrees
-								Node parent = currentNode.parent;
+								FIMTDDNode parent = currentNode.parent;
 								
 								if (parent != null) {
-									Node replacementTree = iNode.alternateTree;
+									FIMTDDNode replacementTree = iNode.alternateTree;
 									parent.setChild(parent.getChildIndex(iNode), replacementTree);
 									if (growthAllowed) replacementTree.restartChangeDetection();
 								} else {
@@ -251,7 +251,7 @@ public class ORTO extends FIMTDD implements Regressor {
 							processInstance(inst, currentNode.alternateTree, prediction, normalError, true, true); // growth is allowed in the alt tree
 						} else if (currentNode instanceof OptionNode) {
 							// this happens when an option node is switched into the tree
-							for (Node child : ((OptionNode) currentNode).children) {
+							for (FIMTDDNode child : ((OptionNode) currentNode).children) {
 								processInstance(inst, child, child.getPrediction(inst), normalError, growthAllowed, inAlternate);
 							}
 							break;
@@ -263,8 +263,8 @@ public class ORTO extends FIMTDD implements Regressor {
 							iNode.initializeAlternateTree();
 						}
 					}
-					if (currentNode instanceof SplitNode) {
-						currentNode = ((SplitNode) currentNode).descendOneStep(inst);
+					if (currentNode instanceof FIMTDDSplitNode) {
+						currentNode = ((FIMTDDSplitNode) currentNode).descendOneStep(inst);
 					} else if (currentNode instanceof OptionNode) {
 						processInstanceOptionNode(inst, (OptionNode) currentNode, prediction, normalError, growthAllowed, inAlternate);
 						break;
@@ -280,12 +280,12 @@ public class ORTO extends FIMTDD implements Regressor {
 			double error = Math.abs(prediction - inst.classValue());
 			node.sumOfAbsErrors += error;
 			
-			if (((InnerNode) node).PageHinckleyTest(error - node.sumOfAbsErrors / node.examplesSeen + PageHinckleyAlphaOption.getValue(), PageHinckleyThresholdOption.getValue())) {
+			if (((FIMTDDInnerNode) node).PageHinckleyTest(error - node.sumOfAbsErrors / node.examplesSeen + PageHinckleyAlphaOption.getValue(), PageHinckleyThresholdOption.getValue())) {
 				node.initializeAlternateTree();
 			}
 		}
 
-		for (Node child : node.children) {
+		for (FIMTDDNode child : node.children) {
 			int index = node.getChildIndex(child);
 			double childPrediction = child.getPrediction(inst);
 			// Loop for compatibility with bagging methods
@@ -295,7 +295,7 @@ public class ORTO extends FIMTDD implements Regressor {
 			}
 		}
 
-		for (Node child : node.children) {
+		for (FIMTDDNode child : node.children) {
 			processInstance(inst, child, child.getPrediction(inst), normalError, growthAllowed && node.alternateTree == null, inAlternate);
 		}
 	}
@@ -313,7 +313,7 @@ public class ORTO extends FIMTDD implements Regressor {
 
 	// region --- Processing methods
 
-	protected void attemptToSplit(LeafNode node, Node parent, int parentIndex) {
+	protected void attemptToSplit(FFMTDDLeafNode node, FIMTDDNode parent, int parentIndex) {
 		// Initialize the split criterion 
 		SplitCriterion splitCriterion = (SplitCriterion) getPreparedClassOption(splitCriterionOption);
 
@@ -376,9 +376,9 @@ public class ORTO extends FIMTDD implements Regressor {
 
 			if (numSplits == 1 || optionFactor < 2.0 || maxTreesOption.getValue() - numTrees <= 1) {
 				AttributeSplitSuggestion splitDecision = acceptedSplits.get(0);
-				SplitNode newSplit = newSplitNode(splitDecision.splitTest);
+				FIMTDDSplitNode newSplit = newSplitNode(splitDecision.splitTest);
 				for (int i = 0; i < splitDecision.numSplits(); i++) {
-					LeafNode newChild = newLeafNode();
+					FFMTDDLeafNode newChild = newLeafNode();
 					newChild.setParent(newSplit);
 					newSplit.setChild(i, newChild);
 				}
@@ -400,9 +400,9 @@ public class ORTO extends FIMTDD implements Regressor {
 					if (j > optionFactor || maxTreesOption.getValue() - numTrees <= 0) {
 						break;
 					}
-					SplitNode newSplit = newSplitNode(splitDecision.splitTest);
+					FIMTDDSplitNode newSplit = newSplitNode(splitDecision.splitTest);
 					for (int i = 0; i < splitDecision.numSplits(); i++) {
-						LeafNode newChild = newLeafNode();
+						FFMTDDLeafNode newChild = newLeafNode();
 						newChild.setParent(newSplit);
 						newSplit.setChild(i, newChild);
 					}
@@ -434,15 +434,15 @@ public class ORTO extends FIMTDD implements Regressor {
 	// endregion --- Processing methods 
 	
 	// region --- Option tree methods
-	protected Node findWorstOption() {
-		Stack<Node> stack = new Stack<Node>();
+	protected FIMTDDNode findWorstOption() {
+		Stack<FIMTDDNode> stack = new Stack<FIMTDDNode>();
 		stack.add(treeRoot);
 
 		double ratio = Double.MIN_VALUE;
-		Node out = null;
+		FIMTDDNode out = null;
 
 		while (!stack.empty()) {
-			Node node = stack.pop();
+			FIMTDDNode node = stack.pop();
 			if (node.getParent() instanceof OptionNode) {
 				OptionNode myParent = (OptionNode) node.getParent();
 				int nodeIndex = myParent.getChildIndex(node);
@@ -453,8 +453,8 @@ public class ORTO extends FIMTDD implements Regressor {
 					out = node;
 				}
 			}
-			if (node instanceof InnerNode) {
-				for (Node child : ((InnerNode) node).children) {
+			if (node instanceof FIMTDDInnerNode) {
+				for (FIMTDDNode child : ((FIMTDDInnerNode) node).children) {
 					stack.add(child);
 				}
 			}
@@ -465,18 +465,18 @@ public class ORTO extends FIMTDD implements Regressor {
 
 	protected void removeExcessTrees() {
 		while (numTrees > maxTreesOption.getValue()) {
-			Node option = findWorstOption();
+			FIMTDDNode option = findWorstOption();
 			OptionNode parent = (OptionNode) option.parent;
 			int index = parent.getChildIndex(option);
 
 			if (parent.children.size() == 2) {
 				parent.children.remove(index);
-				for (Node chld : parent.children) {
+				for (FIMTDDNode chld : parent.children) {
 					chld.parent = parent.parent;
 					parent.parent.setChild(parent.parent.getChildIndex(parent), chld);
 				}
 			} else {
-				AutoExpandVector<Node> children = new AutoExpandVector<Node>();
+				AutoExpandVector<FIMTDDNode> children = new AutoExpandVector<FIMTDDNode>();
 				double[] optionFFSSL = new double[parent.children.size() - 1];
 				double[] optionFFSeen = new double[parent.children.size() - 1];
 
