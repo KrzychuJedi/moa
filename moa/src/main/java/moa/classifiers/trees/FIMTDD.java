@@ -236,7 +236,7 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 		private static final long serialVersionUID = 1L;
 
 		// Perceptron model that carries out the actual learning in each node
-		public FIMTDDPerceptron learningModel;
+		public AbstractClassifier learningModel;
 
 		protected AutoExpandVector<FIMTDDNumericAttributeClassObserver> attributeObservers = new AutoExpandVector<FIMTDDNumericAttributeClassObserver>();
 		
@@ -292,7 +292,7 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 			// sum of absolute errors
 			sumOfAbsErrors += inst.weight() * Math.abs(tree.normalizeTargetValue(Math.abs(inst.classValue() - getPrediction(inst))));
 
-			if (tree.buildingModelTree()) learningModel.updatePerceptron(inst);
+			if (tree.buildingModelTree()) learningModel.trainOnInstanceImpl(inst);
 
 			for (int i = 0; i < inst.numAttributes() - 1; i++) {
 				int instAttIndex = modelAttIndexToInstanceAttIndex(i, inst);
@@ -346,7 +346,7 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 		 * Retrieve the class votes using the perceptron learner
 		 */
 		public double getPredictionModel(Instance inst) {
-			return learningModel.prediction(inst);
+			return learningModel.getPredictionForInstance(inst).getVotes()[0];
 		}
 
 		public double getPredictionTargetMean(Instance inst) {
@@ -519,7 +519,7 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 		}
 	}
 
-	public class FIMTDDPerceptron implements Serializable {
+	public class FIMTDDPerceptron extends AbstractClassifier implements Serializable {
 
 		private static final long serialVersionUID = 1L;
 		
@@ -552,18 +552,22 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 			reset = true;
 		}
 
-
 		public DoubleVector getWeights() {
 			return weightAttribute;
+		}
+
+		@Override
+		public void resetLearningImpl() {
+			reset = true;
 		}
 
 		/**
 		 * Update the model using the provided instance
 		 */
-		public void updatePerceptron(Instance inst) {
+		public void trainOnInstanceImpl(Instance inst) {
 
-			// Initialize perceptron if necessary   
-			if (reset == true) {
+			// Initialize perceptron if necessary
+			if (reset) {
 				reset = false;
 				weightAttribute = new DoubleVector();
 				instancesSeen = 0;
@@ -586,10 +590,22 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 			sumOfValues += inst.weight() * inst.classValue();
 			sumOfSquares += inst.weight() * inst.classValue() * inst.classValue();
 
-			// Loop for compatibility with bagging methods 
+			// Loop for compatibility with bagging methods
 			for (int i = 0; i < (int) inst.weight(); i++) {
 				updateWeights(inst, learningRatio);
 			}
+		}
+
+		@Override
+		public double[] getVotesForInstance(Instance inst) {
+			return new double[] {prediction(inst)};
+		}
+
+		@Override
+		protected Measurement[] getModelMeasurementsImpl() {
+			return new Measurement[]{
+					new Measurement("instances seen", this.instancesSeen)
+			};
 		}
 
 		public void updateWeights(Instance inst, double learningRatio) {
@@ -658,6 +674,11 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 				out.append(" + " + weightAttribute.getValue((getModelContext().numAttributes() - 1)));
 			}
 	        StringUtils.appendNewline(out);
+		}
+
+		@Override
+		public boolean isRandomizable() {
+			return FIMTDD.this.isRandomizable();
 		}
 	}
 
@@ -846,8 +867,12 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 		return new LeafNode(this);
 	}
 
-	protected FIMTDDPerceptron newLeafModel() {
+	protected AbstractClassifier newLeafModel() {
 		return new FIMTDDPerceptron(this);
+	}
+
+	protected AbstractClassifier newLeafModel(AbstractClassifier learningModel) {
+		return new FIMTDDPerceptron((FIMTDDPerceptron) learningModel);
 	}
 
 	//endregion --- Object instatiation methods
@@ -927,7 +952,7 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 				LeafNode newChild = newLeafNode();
 				if (buildingModelTree()) {
 					// Copy the splitting node's perceptron to it's children
-					newChild.learningModel = new FIMTDDPerceptron((FIMTDDPerceptron) node.learningModel);
+					newChild.learningModel = newLeafModel(node.learningModel);
 					
 				}
 				newChild.changeDetection = node.changeDetection;
@@ -947,7 +972,7 @@ public class FIMTDD extends AbstractClassifier implements Regressor {
 			splitNodeCount++;
 		}
 	}
-	
+
 	public double computeSD(double squaredVal, double val, double size) {
 		if (size > 1)
 			return Math.sqrt((squaredVal - ((val * val) / size)) / size);
